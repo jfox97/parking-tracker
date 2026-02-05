@@ -1,0 +1,18 @@
+# SAM CLI configuration file
+# Run `sam deploy --guided` to create your own configuration
+
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "parking-tracker"
+resolve_s3 = true
+s3_prefix = "parking-tracker"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+profile = "personal"
+parameter_overrides = "SecretsName=\"parking-tracker/secrets\""
+image_repositories = []
+
+[default.build.parameters]
+use_container = false
