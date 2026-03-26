@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parking Tracker - Ski Resort Parking Alerts</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Parking Tracker</h1>
+      <p>Get SMS alerts when ski resort parking becomes available</p>
+    </header>
+
+    <div id="alert-container" class="hidden"></div>
+
+    <div class="card">
+      <h2>Subscribe to Alerts</h2>
+      <form id="subscribe-form">
+        <div class="form-group">
+          <label for="phone">Phone Number</label>
+          <input
+            type="tel"
+            id="phone"
+            name="phone"
+            placeholder="+1 (555) 123-4567"
+            required
+          >
+          <small>US phone numbers only. We'll send SMS alerts to this number.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="resort">Resort</label>
+          <select id="resort" name="resort" required>
+            <option value="">Loading resorts...</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="date">Date</label>
+          <input
+            type="date"
+            id="date"
+            name="date"
+            required
+          >
+          <small>Select the date you want to ski.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="invitation-code">Invitation Code</label>
+          <input
+            type="text"
+            id="invitation-code"
+            name="invitation-code"
+            placeholder="Enter your code"
+          >
+          <small>Required for first-time users. Contact the admin to get a code.</small>
+        </div>
+
+        <div class="form-group consent-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="sms-consent" name="sms-consent" required>
+            <span>I agree to receive automated SMS alerts from Parking Tracker. Message frequency varies. Standard message and data rates may apply. Reply STOP to unsubscribe. View our <a href="privacy.html">Privacy Policy</a> and <a href="terms.html">Terms</a>.</span>
+          </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary">
+          Subscribe to Alerts
+        </button>
+      </form>
+    </div>
+
+    <div id="unsubscribe-info" class="hidden"></div>
+
+    <div class="card">
+      <h2>How It Works</h2>
+      <ol style="padding-left: 20px; color: var(--text-muted);">
+        <li style="margin-bottom: 8px;">Enter your phone number and select a resort and date</li>
+        <li style="margin-bottom: 8px;">We'll check parking availability every minute</li>
+        <li style="margin-bottom: 8px;">When parking becomes available, you'll get an SMS alert</li>
+        <li>Click the unsubscribe link in the SMS to stop alerts</li>
+      </ol>
+    </div>
+
+    <footer class="footer">
+      <p>
+        Already subscribed? Check your SMS for the unsubscribe link, or visit the
+        <a href="unsubscribe.html">unsubscribe page</a>.
+      </p>
+      <p style="margin-top: 12px;">
+        <a href="privacy.html">Privacy Policy</a> |
+        <a href="terms.html">Terms and Conditions</a>
+      </p>
+    </footer>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

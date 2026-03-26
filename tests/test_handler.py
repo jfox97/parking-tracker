@@ -9,10 +9,14 @@ from unittest.mock import patch
 class TestLambdaHandler:
     """Tests for the main Lambda handler."""
 
+    @patch("parking_checker.handler.get_fcm_credentials")
+    @patch("parking_checker.handler.get_twilio_credentials")
     @patch("parking_checker.handler.get_tracked_resorts")
-    def test_no_resorts_returns_success(self, mock_get_resorts):
+    def test_no_resorts_returns_success(self, mock_get_resorts, mock_get_twilio, mock_get_fcm):
         """Should return success when no resorts are tracked."""
         mock_get_resorts.return_value = []
+        mock_get_twilio.return_value = {}
+        mock_get_fcm.return_value = {}
 
         from parking_checker.handler import lambda_handler
 
@@ -25,12 +29,14 @@ class TestLambdaHandler:
     @patch("parking_checker.handler.update_parking_state")
     @patch("parking_checker.handler.check_parking_availability")
     @patch("parking_checker.handler.send_sms")
+    @patch("parking_checker.handler.get_fcm_credentials")
     @patch("parking_checker.handler.get_twilio_credentials")
     @patch("parking_checker.handler.get_tracked_resorts")
     def test_sends_sms_when_parking_becomes_available(
         self,
         mock_get_resorts,
-        mock_get_creds,
+        mock_get_twilio,
+        mock_get_fcm,
         mock_send_sms,
         mock_check_parking,
         mock_update_state,
@@ -39,18 +45,19 @@ class TestLambdaHandler:
         mock_get_resorts.return_value = [
             {
                 "pk": "DATE#2026-02-01",
-                "sk": "RESORT#brighton",
+                "sk": "RESORT#brighton#PHONE#+12065551234",
                 "resort_name": "brighton",
                 "date": "2026-02-01",
                 "phone_number": "+12065551234",
                 "last_status": "unavailable",
             }
         ]
-        mock_get_creds.return_value = {
+        mock_get_twilio.return_value = {
             "account_sid": "test",
             "auth_token": "test",
             "from_number": "+10001112222",
         }
+        mock_get_fcm.return_value = {}
         mock_check_parking.return_value = {
             "available": True,
             "spots": 5,
@@ -72,12 +79,14 @@ class TestLambdaHandler:
     @patch("parking_checker.handler.update_parking_state")
     @patch("parking_checker.handler.check_parking_availability")
     @patch("parking_checker.handler.send_sms")
+    @patch("parking_checker.handler.get_fcm_credentials")
     @patch("parking_checker.handler.get_twilio_credentials")
     @patch("parking_checker.handler.get_tracked_resorts")
     def test_no_sms_when_already_available(
         self,
         mock_get_resorts,
-        mock_get_creds,
+        mock_get_twilio,
+        mock_get_fcm,
         mock_send_sms,
         mock_check_parking,
         mock_update_state,
@@ -86,18 +95,19 @@ class TestLambdaHandler:
         mock_get_resorts.return_value = [
             {
                 "pk": "DATE#2026-02-01",
-                "sk": "RESORT#brighton",
+                "sk": "RESORT#brighton#PHONE#+12065551234",
                 "resort_name": "brighton",
                 "date": "2026-02-01",
                 "phone_number": "+12065551234",
                 "last_status": "available",  # Already available
             }
         ]
-        mock_get_creds.return_value = {
+        mock_get_twilio.return_value = {
             "account_sid": "test",
             "auth_token": "test",
             "from_number": "+10001112222",
         }
+        mock_get_fcm.return_value = {}
         mock_check_parking.return_value = {
             "available": True,
             "spots": 5,
@@ -111,10 +121,14 @@ class TestLambdaHandler:
         assert result["statusCode"] == 200
         mock_send_sms.assert_not_called()
 
+    @patch("parking_checker.handler.get_fcm_credentials")
+    @patch("parking_checker.handler.get_twilio_credentials")
     @patch("parking_checker.handler.get_tracked_resorts")
-    def test_handles_exception(self, mock_get_resorts):
+    def test_handles_exception(self, mock_get_resorts, mock_get_twilio, mock_get_fcm):
         """Should return 500 on exception."""
         mock_get_resorts.side_effect = Exception("Database error")
+        mock_get_twilio.return_value = {}
+        mock_get_fcm.return_value = {}
 
         from parking_checker.handler import lambda_handler
 

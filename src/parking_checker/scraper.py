@@ -32,12 +32,16 @@ HONK_RESORTS: dict[str, HonkResortConfig] = {
         facility_id="rrIb",
         timezone_offset="-07:00",
     ),
-    # Add more resorts as needed:
-    # "solitude": HonkResortConfig(
-    #     honk_guid="...",
-    #     facility_id="...",
-    #     timezone_offset="-07:00",
-    # ),
+    "alta": HonkResortConfig(
+        honk_guid="3w6io40e16aqh2x9uqzkth",
+        facility_id="72U6",
+        timezone_offset="-07:00",
+    ),
+    "solitude": HonkResortConfig(
+        honk_guid="f0018vr3r1r82dj16y5r0r",
+        facility_id="n6iK",
+        timezone_offset="-07:00",
+    )
 }
 
 GRAPHQL_QUERY = """
@@ -143,9 +147,7 @@ def _query_honk_availability(config: HonkResortConfig, target_date: str) -> dict
     return result
 
 
-def _parse_honk_response(
-    data: dict[str, Any], target_date: str, timezone_offset: str = "-07:00"
-) -> dict[str, Any]:
+def _parse_honk_response(data: dict[str, Any], target_date: str) -> dict[str, Any]:
     """
     Parse the Honk Mobile API response to extract availability.
 
@@ -165,7 +167,6 @@ def _parse_honk_response(
     Args:
         data: Raw API response
         target_date: Date being checked (YYYY-MM-DD format)
-        timezone_offset: Timezone offset for the date key (e.g., "-07:00")
 
     Returns:
         Parsed availability dict
@@ -183,13 +184,15 @@ def _parse_honk_response(
 
             availability_data = json.loads(availability_data)
 
-        # Build the date key in the format used by the API: "YYYY-MM-DDT00:00:00-07:00"
-        date_key = f"{target_date}T00:00:00{timezone_offset}"
-
-        day_data = availability_data.get(date_key)
+        # Find the key matching our target date (handles varying timezone offsets due to DST)
+        day_data = None
+        for key in availability_data:
+            if key.startswith(f"{target_date}T"):
+                day_data = availability_data[key]
+                break
 
         if not day_data:
-            logger.warning(f"No data for date key {date_key}")
+            logger.warning(f"No data for date {target_date} in response keys: {list(availability_data.keys())}")
             return {"available": False, "spots": None, "details": "Date not found in response"}
 
         # Extract the status object
@@ -251,7 +254,7 @@ def check_brighton(target_date: str) -> dict[str, Any]:
 
     try:
         response = _query_honk_availability(config, target_date)
-        return _parse_honk_response(response, target_date, config.timezone_offset)
+        return _parse_honk_response(response, target_date)
     except requests.RequestException as e:
         logger.error(f"Failed to query Brighton parking: {e}")
         return {"available": False, "spots": None, "details": f"Request failed: {e}"}
@@ -265,7 +268,7 @@ def _create_honk_scraper(resort_key: str):
         config = HONK_RESORTS[resort_key]
         try:
             response = _query_honk_availability(config, target_date)
-            return _parse_honk_response(response, target_date, config.timezone_offset)
+            return _parse_honk_response(response, target_date)
         except requests.RequestException as e:
             logger.error(f"Failed to query {resort_key} parking: {e}")
             return {"available": False, "spots": None, "details": f"Request failed: {e}"}

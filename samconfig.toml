@@ -1,5 +1,5 @@
 # SAM CLI configuration file
-# Run `sam deploy --guided` to create your own configuration
+# Run `sam deploy --guided` to update your configuration
 
 version = 0.1
 
@@ -11,7 +11,7 @@ region = "us-east-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 profile = "personal"
-parameter_overrides = "SecretsName=\"parking-tracker/secrets\""
+parameter_overrides = "SecretsName=parking-tracker/secrets DomainName=parking.foxjason.com HostedZoneId=Z0858926UD8MDXG8JDTE"
 image_repositories = []
 
 [default.build.parameters]

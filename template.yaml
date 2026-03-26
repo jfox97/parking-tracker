@@ -16,10 +16,33 @@ Parameters:
   SecretsName:
     Type: String
     Default: parking-tracker/secrets
-    Description: Name of the Secrets Manager secret containing Twilio credentials
+    Description: Name of the Secrets Manager secret containing Twilio credentials and TOKEN_SECRET
+
+  HostedZoneId:
+    Type: String
+    Description: Route 53 Hosted Zone ID for the domain
+
+  DomainName:
+    Type: String
+    Default: parking.foxjason.com
+    Description: Domain name for the web interface
+
+  # NOTE: ACM certificates for CloudFront MUST be in us-east-1.
+  # If deploying to another region, create the certificate in us-east-1 first
+  # and provide the ARN here.
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM Certificate ARN (must be in us-east-1). Leave empty to create one (only works if stack is in us-east-1)
+
+Conditions:
+  CreateCertificate: !Equals [!Ref CertificateArn, ""]
 
 Resources:
-  # DynamoDB table to store resort configurations and tracking state
+  # =============================================================================
+  # DynamoDB Table
+  # =============================================================================
+
   ConfigTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -30,26 +53,44 @@ Resources:
           AttributeType: S
         - AttributeName: sk
           AttributeType: S
+        - AttributeName: phone_number
+          AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
         - AttributeName: sk
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: phone-number-index
+          KeySchema:
+            - AttributeName: phone_number
+              KeyType: HASH
+            - AttributeName: pk
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
-  # Lambda function that checks parking availability
+  # =============================================================================
+  # Lambda Functions
+  # =============================================================================
+
+  # Existing parking checker Lambda (scheduled)
   ParkingCheckerFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
       Handler: parking_checker.handler.lambda_handler
       Description: Checks ski resort parking availability and sends alerts
+      Environment:
+        Variables:
+          DOMAIN_NAME: !Ref DomainName
       Events:
         ScheduleEvent:
           Type: Schedule
           Properties:
             Schedule: rate(1 minute)
             Description: Check parking every minute
-            Enabled: false
+            Enabled: true
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ConfigTable
@@ -59,10 +100,271 @@ Resources:
                 - secretsmanager:GetSecretValue
               Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretsName}*
 
+  # New Web API Lambda
+  WebApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: web_api.handler.lambda_handler
+      Description: Handles web API requests for subscription management
+      Environment:
+        Variables:
+          DOMAIN_NAME: !Ref DomainName
+      Events:
+        GetResorts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/resorts
+            Method: GET
+        VerifyCode:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/verify-code
+            Method: POST
+        Subscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/subscribe
+            Method: POST
+        GetSubscriptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/subscriptions
+            Method: GET
+        UnsubscribeSpecific:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/unsubscribe
+            Method: POST
+        UnsubscribeAll:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/unsubscribe-all
+            Method: POST
+        # Device management endpoints
+        RegisterDevice:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/devices/register
+            Method: POST
+        RefreshDeviceToken:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/devices/refresh-token
+            Method: POST
+        UnregisterDevice:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/devices/{device_id}
+            Method: DELETE
+        GetDeviceSubscriptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/devices/{device_id}/subscriptions
+            Method: GET
+        DeviceSubscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/devices/{device_id}/subscribe
+            Method: POST
+        DeviceUnsubscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebApi
+            Path: /api/devices/unsubscribe
+            Method: POST
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretsName}*
+
+  # =============================================================================
+  # API Gateway
+  # =============================================================================
+
+  WebApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Unsubscribe-Token'"
+        AllowOrigin: !Sub "'https://${DomainName}'"
+        AllowCredentials: false
+
+  # =============================================================================
+  # S3 Bucket for Static Website
+  # =============================================================================
+
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-web-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${WebBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+
+  # =============================================================================
+  # CloudFront Distribution
+  # =============================================================================
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ACM Certificate (only created if CertificateArn parameter is empty)
+  # NOTE: This only works if the stack is deployed to us-east-1
+  WebCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: CreateCertificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Aliases:
+          - !Ref DomainName
+        ViewerCertificate:
+          AcmCertificateArn: !If [CreateCertificate, !Ref WebCertificate, !Ref CertificateArn]
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          # S3 origin for static files
+          - Id: S3Origin
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOAC
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          # API Gateway origin
+          - Id: ApiOrigin
+            DomainName: !Sub ${WebApi}.execute-api.${AWS::Region}.amazonaws.com
+            OriginPath: /prod
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          Compress: true
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: ApiOrigin
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # AllViewerExceptHostHeader
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - PATCH
+              - POST
+              - DELETE
+        CustomErrorResponses:
+          # Return index.html for 404s (SPA support)
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        PriceClass: PriceClass_100  # US, Canada, Europe only (cheapest)
+
+  # =============================================================================
+  # Route 53 DNS Record
+  # =============================================================================
+
+  WebDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2  # CloudFront's hosted zone ID (constant)
+
+# =============================================================================
+# Outputs
+# =============================================================================
+
 Outputs:
   ParkingCheckerFunction:
     Description: Parking Checker Lambda Function ARN
     Value: !GetAtt ParkingCheckerFunction.Arn
+
+  WebApiFunction:
+    Description: Web API Lambda Function ARN
+    Value: !GetAtt WebApiFunction.Arn
+
   ConfigTableName:
     Description: DynamoDB Config Table Name
     Value: !Ref ConfigTable
+
+  WebsiteURL:
+    Description: Website URL
+    Value: !Sub https://${DomainName}
+
+  ApiURL:
+    Description: API Gateway URL (direct, use CloudFront URL in production)
+    Value: !Sub https://${WebApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+
+  CloudFrontDistributionId:
+    Description: CloudFront Distribution ID (for cache invalidation)
+    Value: !Ref CloudFrontDistribution
+
+  WebBucketName:
+    Description: S3 Bucket for web files
+    Value: !Ref WebBucket
+
+  DeployFrontendCommand:
+    Description: Command to deploy frontend files
+    Value: !Sub aws s3 sync frontend/ s3://${WebBucket}/ --delete

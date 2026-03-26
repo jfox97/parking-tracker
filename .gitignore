@@ -38,3 +38,9 @@ build/
 
 # AWS credentials (never commit)
 credentials.json
+
+# Deployment config (contains AWS account ID and Route 53 zone ID)
+samconfig.toml
+
+# Firebase config (contains API keys)
+mobile/google-services.json

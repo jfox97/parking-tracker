@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unsubscribe - Parking Tracker</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Parking Tracker</h1>
+      <p>Manage your parking alert subscriptions</p>
+    </header>
+
+    <div id="alert-container" class="hidden"></div>
+
+    <!-- Loading state -->
+    <div id="loading-state" class="card">
+      <div style="text-align: center; padding: 20px;">
+        <span class="spinner" style="border-color: var(--primary-color); border-top-color: transparent;"></span>
+        <p style="margin-top: 12px; color: var(--text-muted);">Processing your request...</p>
+      </div>
+    </div>
+
+    <!-- Unsubscribe confirmation -->
+    <div id="unsubscribe-single" class="card hidden">
+      <h2>Unsubscribe from Alert</h2>
+      <p id="unsubscribe-details" style="margin-bottom: 16px;"></p>
+      <button id="confirm-unsubscribe" class="btn btn-danger">
+        Confirm Unsubscribe
+      </button>
+      <div class="divider"></div>
+      <p style="font-size: 0.875rem; color: var(--text-muted);">
+        Want to unsubscribe from all alerts?
+        <a href="#" id="show-unsubscribe-all">Click here</a>
+      </p>
+    </div>
+
+    <!-- Unsubscribe all -->
+    <div id="unsubscribe-all-section" class="card hidden">
+      <h2>Unsubscribe from All Alerts</h2>
+      <p style="margin-bottom: 16px; color: var(--text-muted);">
+        This will remove all your parking alert subscriptions.
+      </p>
+      <button id="confirm-unsubscribe-all" class="btn btn-danger">
+        Unsubscribe from All
+      </button>
+    </div>
+
+    <!-- Success state -->
+    <div id="success-state" class="card hidden">
+      <div style="text-align: center;">
+        <div style="font-size: 48px; margin-bottom: 16px;">&#10003;</div>
+        <h2>Successfully Unsubscribed</h2>
+        <p id="success-message" style="color: var(--text-muted); margin-bottom: 20px;"></p>
+        <a href="index.html" class="btn btn-secondary" style="text-decoration: none;">
+          Subscribe to New Alerts
+        </a>
+      </div>
+    </div>
+
+    <!-- No token state - show phone input form -->
+    <div id="no-token-state" class="card hidden">
+      <h2>Unsubscribe from All Alerts</h2>
+      <p style="margin-bottom: 16px; color: var(--text-muted);">
+        Enter your phone number and we'll send you a link to manage your subscriptions.
+      </p>
+      <form id="phone-form">
+        <div class="form-group">
+          <label for="phone-input">Phone Number</label>
+          <input
+            type="tel"
+            id="phone-input"
+            name="phone"
+            placeholder="(555) 555-5555"
+            required
+          >
+        </div>
+        <button type="submit" id="send-link-btn" class="btn btn-primary" style="width: 100%;">
+          Send Unsubscribe Link
+        </button>
+      </form>
+      <div class="divider"></div>
+      <p style="font-size: 0.875rem; color: var(--text-muted); text-align: center;">
+        <a href="index.html">Subscribe to new alerts</a>
+      </p>
+    </div>
+
+    <!-- Link sent state -->
+    <div id="link-sent-state" class="card hidden">
+      <div style="text-align: center;">
+        <div style="font-size: 48px; margin-bottom: 16px;">&#128241;</div>
+        <h2>Check Your Phone</h2>
+        <p id="link-sent-message" style="color: var(--text-muted); margin-bottom: 20px;"></p>
+        <a href="index.html" class="btn btn-secondary" style="text-decoration: none;">
+          Back to Home
+        </a>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <p><a href="index.html">Back to Home</a></p>
+      <p style="margin-top: 8px;">
+        <a href="privacy.html">Privacy Policy</a> |
+        <a href="terms.html">Terms and Conditions</a>
+      </p>
+    </footer>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      initUnsubscribePage();
+    });
+
+    let currentToken = null;
+    let tokenData = null;
+
+    async function initUnsubscribePage() {
+      // Get token from URL
+      const params = new URLSearchParams(window.location.search);
+      currentToken = params.get('token');
+
+      if (!currentToken) {
+        showState('no-token');
+        return;
+      }
+
+      // Try to decode token to get subscription info
+      try {
+        // Tokens are base64 encoded, try to extract info for display
+        const decoded = atob(currentToken);
+        const parts = decoded.split('|')[0].split(':');
+
+        if (parts[0] === 'MASTER') {
+          // Master unsubscribe token
+          showState('unsubscribe-all');
+          document.getElementById('confirm-unsubscribe-all').addEventListener('click', handleUnsubscribeAll);
+        } else if (parts.length >= 3) {
+          // Single subscription token
+          tokenData = {
+            phone: parts[0],
+            resort: parts[1],
+            date: parts[2]
+          };
+          showState('unsubscribe-single');
+          document.getElementById('unsubscribe-details').textContent =
+            `You're about to unsubscribe from parking alerts for ${formatResortName(tokenData.resort)} on ${formatDate(tokenData.date)}.`;
+          document.getElementById('confirm-unsubscribe').addEventListener('click', handleUnsubscribeSingle);
+          document.getElementById('show-unsubscribe-all').addEventListener('click', (e) => {
+            e.preventDefault();
+            showState('unsubscribe-all');
+          });
+        } else {
+          showState('no-token');
+        }
+      } catch (error) {
+        console.error('Error parsing token:', error);
+        // Still try to unsubscribe with the token
+        showState('unsubscribe-single');
+        document.getElementById('unsubscribe-details').textContent =
+          'Click the button below to unsubscribe from this parking alert.';
+        document.getElementById('confirm-unsubscribe').addEventListener('click', handleUnsubscribeSingle);
+      }
+    }
+
+    async function handleUnsubscribeSingle() {
+      const btn = document.getElementById('confirm-unsubscribe');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Unsubscribing...';
+
+      try {
+        const response = await ParkingAPI.unsubscribe(currentToken);
+
+        if (response.ok && response.data.success) {
+          showState('success');
+          document.getElementById('success-message').textContent = response.data.message;
+        } else {
+          showAlert(response.data.error || 'Failed to unsubscribe. Please try again.', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Confirm Unsubscribe';
+        }
+      } catch (error) {
+        console.error('Unsubscribe error:', error);
+        showAlert('Network error. Please try again.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Confirm Unsubscribe';
+      }
+    }
+
+    async function handleUnsubscribeAll() {
+      const btn = document.getElementById('confirm-unsubscribe-all');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Unsubscribing...';
+
+      try {
+        const response = await ParkingAPI.unsubscribeAll(currentToken);
+
+        if (response.ok && response.data.success) {
+          showState('success');
+          const count = response.data.removed_count || 0;
+          document.getElementById('success-message').textContent =
+            `Successfully unsubscribed from ${count} alert${count !== 1 ? 's' : ''}.`;
+        } else {
+          showAlert(response.data.error || 'Failed to unsubscribe. Please try again.', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Unsubscribe from All';
+        }
+      } catch (error) {
+        console.error('Unsubscribe all error:', error);
+        showAlert('Network error. Please try again.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Unsubscribe from All';
+      }
+    }
+
+    function showState(state) {
+      // Hide all states
+      document.getElementById('loading-state').classList.add('hidden');
+      document.getElementById('unsubscribe-single').classList.add('hidden');
+      document.getElementById('unsubscribe-all-section').classList.add('hidden');
+      document.getElementById('success-state').classList.add('hidden');
+      document.getElementById('no-token-state').classList.add('hidden');
+      document.getElementById('link-sent-state').classList.add('hidden');
+
+      // Show requested state
+      switch (state) {
+        case 'loading':
+          document.getElementById('loading-state').classList.remove('hidden');
+          break;
+        case 'unsubscribe-single':
+          document.getElementById('unsubscribe-single').classList.remove('hidden');
+          break;
+        case 'unsubscribe-all':
+          document.getElementById('unsubscribe-all-section').classList.remove('hidden');
+          break;
+        case 'success':
+          document.getElementById('success-state').classList.remove('hidden');
+          break;
+        case 'no-token':
+          document.getElementById('no-token-state').classList.remove('hidden');
+          setupPhoneForm();
+          break;
+        case 'link-sent':
+          document.getElementById('link-sent-state').classList.remove('hidden');
+          break;
+      }
+    }
+
+    function setupPhoneForm() {
+      const form = document.getElementById('phone-form');
+      if (form._listenerAdded) return;
+      form._listenerAdded = true;
+
+      form.addEventListener('submit', handleSendLink);
+    }
+
+    async function handleSendLink(e) {
+      e.preventDefault();
+      const btn = document.getElementById('send-link-btn');
+      const phoneInput = document.getElementById('phone-input');
+      const phone = phoneInput.value.trim();
+
+      if (!phone) {
+        showAlert('Please enter a phone number.', 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Sending...';
+
+      try {
+        const response = await ParkingAPI.sendUnsubscribeLink(phone);
+
+        if (response.ok && response.data.success) {
+          showState('link-sent');
+          document.getElementById('link-sent-message').textContent = response.data.message;
+        } else {
+          showAlert(response.data.error || 'Failed to send link. Please try again.', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Send Unsubscribe Link';
+        }
+      } catch (error) {
+        console.error('Send link error:', error);
+        showAlert('Network error. Please try again.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Send Unsubscribe Link';
+      }
+    }
+
+    function showAlert(message, type) {
+      const container = document.getElementById('alert-container');
+      container.innerHTML = `<div class="alert alert-${type}">${escapeHtml(message)}</div>`;
+      container.classList.remove('hidden');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function formatResortName(name) {
+      return name.split('-').map(word =>
+        word.charAt(0).toUpperCase() + word.slice(1)
+      ).join(' ');
+    }
+
+    function formatDate(dateStr) {
+      const date = new Date(dateStr + 'T00:00:00');
+      return date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    }
+  </script>
+</body>
+</html>
